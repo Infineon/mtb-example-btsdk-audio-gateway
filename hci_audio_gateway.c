@@ -86,7 +86,6 @@
 #include "wiced_bt_cfg.h"
 #include "wiced_memory.h"
 #include "wiced_platform.h"
-#include "wiced_bt_hfp_hf.h"
 #include "hci_audio_gateway.h"
 #include "hci_control_api.h"
 #include "wiced_transport.h"
@@ -134,18 +133,19 @@ typedef struct
  */
 const uint8_t hci_control_sdp_db[] =
 {
-    SDP_ATTR_SEQUENCE_1( 51 ),                                             // length is the sum of all records
+    SDP_ATTR_SEQUENCE_1( 62 ),                                             // length is the sum of all records
 
     // SDP record for HF ( total length of record: 51 )
-    SDP_ATTR_SEQUENCE_1( 49 ),                                              // 2 bytes, length of the record
+    SDP_ATTR_SEQUENCE_1( 60 ),                                              // 2 bytes, length of the record
         SDP_ATTR_RECORD_HANDLE( 0x10001 ),                                  // 8 byte ( handle=0x10001 )
         SDP_ATTR_ID( ATTR_ID_SERVICE_CLASS_ID_LIST ),                       // 3 bytes
         SDP_ATTR_SEQUENCE_1( 6 ),                                           // 2 bytes
         SDP_ATTR_UUID16( 0x111F ),                                          // 3 bytes ServiceClass0 UUID_SERVCLASS_HF_HANDSFREE
         SDP_ATTR_UUID16( 0X1203 ),                                          // 3 bytes ServiceClass1 UUID_SERVCLASS_GENERIC_AUDIO
         SDP_ATTR_RFCOMM_PROTOCOL_DESC_LIST( 1 ),                            // 17 bytes ( SCN=1 )
-        SDP_ATTR_PROFILE_DESC_LIST( UUID_SERVCLASS_AG_HANDSFREE, 0x0105 ),  // 13 bytes UUID_SERVCLASS_HF_HANDSFREE, version 0x0105
-
+        SDP_ATTR_PROFILE_DESC_LIST( UUID_SERVCLASS_AG_HANDSFREE, 0x0108 ),  // 13 bytes UUID_SERVCLASS_HF_HANDSFREE, version 0x0108
+        SDP_ATTR_UINT1(ATTR_ID_NETWORK, 0x00),                                  // 5 byte
+        SDP_ATTR_UINT2(ATTR_ID_SUPPORTED_FEATURES,  AG_SUPPORTED_FEATURES_ATT), //6 bytes
 };
 
 hci_control_nvram_chunk_t *p_nvram_first = NULL;
@@ -707,6 +707,15 @@ void hci_control_ag_handle_command( uint16_t opcode, uint8_t* p_data, uint32_t l
     case HCI_CONTROL_AG_COMMAND_CLOSE_AUDIO:
         handle = p[0] | ( p[1] << 8 );
         hfp_ag_audio_close( handle );
+        break;
+
+    case HCI_CONTROL_AG_COMMAND_SET_CIND:
+        hfp_ag_set_cind((char *)&p[0], length);
+        break;
+
+    case HCI_CONTROL_AG_COMMAND_STR:
+        handle = p[0] | ( p[1] << 8 );
+        hfp_ag_send_cmd_str(handle, &p[2], length-2);
         break;
 
     default:
