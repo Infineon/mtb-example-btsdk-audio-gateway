@@ -49,7 +49,8 @@ SUPPORTED_TARGETS = \
   CYW920719B2Q40EVB-01 \
   CYW920706WCDEVAL \
   CYW920721M2EVK-01 \
-  CYW920721M2EVK-02
+  CYW920721M2EVK-02 \
+  CYW920721M2EVB-03
 
 #
 # Advanced Configuration
@@ -77,6 +78,7 @@ UART?=AUTO
 XIP?=xip
 TRANSPORT?=UART
 ENABLE_DEBUG?=0
+AUDIO_SHIELD_20721M2EVB_03_INCLUDED?=0
 
 # wait for SWD attach
 ifeq ($(ENABLE_DEBUG),1)
@@ -93,6 +95,16 @@ COMPONENTS += hfp_audio_gateway
 
 # Chip-specific patch libs
 CY_20706A2_APP_PATCH_LIBS += wiced_voice_path.a
+
+# Chip-specific COMPONENTS
+ifeq ($(TARGET),CYW920721M2EVB-03)
+AUDIO_SHIELD_20721M2EVB_03_INCLUDED=1
+endif
+
+ifeq ($(AUDIO_SHIELD_20721M2EVB_03_INCLUDED),1)
+DISABLE_COMPONENTS += bsp_design_modus
+COMPONENTS += bsp_design_modus_shield
+endif
 
 ################################################################################
 # Paths

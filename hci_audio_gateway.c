@@ -190,7 +190,6 @@ static void     hci_control_misc_handle_get_version( void );
 static wiced_result_t hci_control_management_callback( wiced_bt_management_evt_t event, wiced_bt_management_evt_data_t *p_event_data );
 static void     hci_control_handle_set_pairability ( uint8_t pairing_allowed );
 
-extern void     wiced_bt_trace_array( const char *string, const uint8_t* array, const uint16_t len );
 extern uint8_t  avrc_is_abs_volume_capable( void );
 
 /******************************************************
@@ -212,11 +211,7 @@ APPLICATION_START( )
 
     // Set to PUART to see traces on peripheral uart(puart)
     wiced_hal_puart_init();
-#if defined(CYW20706A2)
-    wiced_hal_puart_set_baudrate( 3000000 );
-#else
     wiced_hal_puart_configuration( 3000000, PARITY_NONE, STOP_BIT_2 );
-#endif
     wiced_set_debug_uart( WICED_ROUTE_DEBUG_TO_PUART );
 #if ( defined(CYW20706A2) || defined(CYW20735B0) || defined(CYW20719B0) || defined(CYW43012C0) )
     wiced_hal_puart_select_uart_pads( WICED_PUART_RXD, WICED_PUART_TXD, 0, 0);
@@ -371,7 +366,7 @@ void hci_control_write_eir( void )
     *p++ = 0;
 
     // print EIR data
-    wiced_bt_trace_array( "EIR :", ( uint8_t* )( pBuf+1 ), MIN( p-( uint8_t* )pBuf,100 ) );
+    WICED_BT_TRACE_ARRAY( ( uint8_t* )( pBuf+1 ), MIN( p-( uint8_t* )pBuf,100 ), "EIR :" );
     wiced_bt_dev_write_eir( pBuf, (uint16_t)(p - pBuf) );
 
     return;
