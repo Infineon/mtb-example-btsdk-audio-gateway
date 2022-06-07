@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2021, Cypress Semiconductor Corporation (an Infineon company) or
+ * Copyright 2016-2022, Cypress Semiconductor Corporation (an Infineon company) or
  * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
  *
  * This software, including source code, documentation and related
@@ -97,6 +97,11 @@
 #include "wiced_bt_trace.h"
 #include "wiced_bt_rfcomm.h"
 #include "wiced_timer.h"
+#include "wiced_bt_ble.h"
+#include "wiced_bt_sco.h"
+#if defined(CYW55572A1)
+#include "wiced_audio_manager.h"
+#endif
 
 /*****************************************************************************
 **  Constants
@@ -112,7 +117,11 @@
 #define KEY_INFO_POOL_BUFFER_SIZE               145 //Size of the buffer used for holding the peer device key info
 #define KEY_INFO_POOL_BUFFER_COUNT              10  //Correspond's to the number of peer devices
 
+#ifdef CYW55572
+#define AG_BUTTON_VOLUME_GAIN                   WICED_BUTTON1
+#else
 #define AG_BUTTON_VOLUME_GAIN                   WICED_GPIO_PIN_BUTTON
+#endif
 
 /*****************************************************************************
 **  Structures
@@ -124,6 +133,30 @@ typedef struct
     uint8_t  chunk_len;
     uint8_t  data[1];
 } hci_control_nvram_chunk_t;
+
+#if BTSTACK_VER >= 0x03000001
+#ifndef PACKED
+#define PACKED
+#endif
+#pragma pack(1)
+
+typedef PACKED struct
+{
+    uint8_t                           br_edr_key_type;
+    wiced_bt_link_key_t               br_edr_key;
+    wiced_bt_dev_le_key_type_t        le_keys_available_mask;
+    wiced_bt_ble_address_type_t       ble_addr_type;
+    wiced_bt_ble_address_type_t       static_addr_type; //55572A1 does not have but 20721 does.
+    wiced_bt_device_address_t         static_addr; //55572A1 does not have but 20721 does.
+    wiced_bt_ble_keys_t               le_keys;
+} wiced_bt_device_sec_keys_t_20721;
+
+typedef PACKED struct
+{
+    wiced_bt_device_address_t   bd_addr;
+    wiced_bt_device_sec_keys_t_20721  key_data;
+} wiced_bt_device_link_keys_t_20721;
+#endif
 
 /******************************************************
  *               Variables Definitions
@@ -160,17 +193,66 @@ wiced_bt_buffer_pool_t* p_key_info_pool;//Pool for storing the  key info
 uint8_t pincode[4]  = {0x30,0x30,0x30,0x30};
 
 static uint32_t hci_control_proc_rx_cmd( uint8_t *p_data, uint32_t length );
+#if BTSTACK_VER >= 0x03000001
+static void      hci_control_tx_complete(void);
+#else
 static void      hci_control_tx_complete( wiced_transport_buffer_pool_t* p_pool );
+#endif
 
 const wiced_transport_cfg_t  transport_cfg =
 {
     WICED_TRANSPORT_UART,
     {{ WICED_TRANSPORT_UART_HCI_MODE, HCI_UART_DEFAULT_BAUD}},
+#if BTSTACK_VER >= 0x03000001
+    .heap_config =
+    {
+        .data_heap_size = 1024 * 4 + 1500 * 2,
+        .hci_trace_heap_size = 1024 * 2,
+        .debug_trace_heap_size = 1024,
+    },
+#else
     { TRANS_UART_BUFFER_SIZE, 1},
+#endif
     NULL,
     hci_control_proc_rx_cmd,
     hci_control_tx_complete
 };
+
+#if BTSTACK_VER >= 0x03000001
+#define BT_STACK_HEAP_SIZE          1024 * 7
+wiced_bt_heap_t *p_default_heap = NULL;
+#endif
+
+wiced_bt_voice_path_setup_t audiogateway_sco_path = {
+#ifdef CYW20706A2
+    .path = WICED_BT_SCO_OVER_I2SPCM,
+#else
+    .path = WICED_BT_SCO_OVER_PCM,
+#endif
+#if defined(CYW20721B2) || defined (CYW43012C0) || defined(CYW55572A1)
+    .p_sco_data_cb = NULL
+#endif
+};
+
+#if defined(CYW55572A1)
+static int32_t stream_id = WICED_AUDIO_MANAGER_STREAM_ID_INVALID;
+static wiced_bool_t app_ag_use_wbs = WICED_TRUE;
+static audio_config_t audio_config =
+    {
+#if (WICED_BT_HFP_HF_WBS_INCLUDED == TRUE)
+        .sr = AM_PLAYBACK_SR_16K,
+#else
+        .sr = AM_PLAYBACK_SR_8K,
+#endif
+       .channels = 1,
+       .bits_per_sample = DEFAULT_BITSPSAM,
+       .volume = AM_VOL_LEVEL_HIGH-2,
+       .mic_gain = AM_VOL_LEVEL_HIGH-2,
+       .sink = AM_HEADPHONES,
+    };
+#endif
+
+static uint32_t app_ag_button_gpio = AG_BUTTON_VOLUME_GAIN;
 
 /******************************************************
  *               Function Declarations
@@ -209,9 +291,14 @@ APPLICATION_START( )
     // Set the debug uart as WICED_ROUTE_DEBUG_NONE to get rid of prints
     // wiced_set_debug_uart(WICED_ROUTE_DEBUG_NONE);
 
+#ifdef CYW55572
+    // Default PUART baudrate is 115200, update it to 3M before calling wiced_set_debug_uart(WICED_ROUTE_DEBUG_TO_PUART);
+    wiced_set_debug_uart_baudrate(3000000);
+#else
     // Set to PUART to see traces on peripheral uart(puart)
     wiced_hal_puart_init();
     wiced_hal_puart_configuration( 3000000, PARITY_NONE, STOP_BIT_2 );
+#endif
     wiced_set_debug_uart( WICED_ROUTE_DEBUG_TO_PUART );
 #if ( defined(CYW20706A2) || defined(CYW20735B0) || defined(CYW20719B0) || defined(CYW43012C0) )
     wiced_hal_puart_select_uart_pads( WICED_PUART_RXD, WICED_PUART_TXD, 0, 0);
@@ -231,8 +318,26 @@ APPLICATION_START( )
     WICED_BT_TRACE( "Audio Gateway APP START\n" );
     WICED_BT_TRACE( "#######################\n" );
 
+
+#if BTSTACK_VER >= 0x03000001
+    /* Create default heap */
+    p_default_heap = wiced_bt_create_heap("default_heap", NULL, BT_STACK_HEAP_SIZE, NULL,
+            WICED_TRUE);
+    if (p_default_heap == NULL)
+    {
+        WICED_BT_TRACE("create default heap error: size %d\n", BT_STACK_HEAP_SIZE);
+        return;
+    }
+#endif
+
+#if BTSTACK_VER >= 0x03000001
+    /* Register the dynamic configurations */
+    ret = wiced_bt_stack_init( hci_control_management_callback, &hci_ag_cfg_settings);
+#else
     /* Register the dynamic configurations */
     ret = wiced_bt_stack_init( hci_control_management_callback, &hci_ag_cfg_settings, hci_ag_cfg_buf_pools);
+#endif
+
     if( ret != WICED_BT_SUCCESS )
         return;
 
@@ -253,8 +358,10 @@ static void button_gpio_interrupt_handler(void *data, uint8_t pin)
     hfp_ag_session_cb_t *p_scb = &hci_control_cb.ag_scb[0];
     uint8_t temp_vg = vg_button;
     uint8_t gpio_status;
+    uint32_t* p_button_gpio = (uint32_t *)data;
 
-    gpio_status = wiced_hal_gpio_get_pin_input_status( (uint32_t)pin );
+    // Callback pin is incorrect in 55572A1, so replaced it by using user data now.
+    gpio_status = wiced_hal_gpio_get_pin_input_status( *p_button_gpio );
 
     /* only handle the valid release-button event (including press and release) */
     if (gpio_status == WICED_FALSE)
@@ -305,7 +412,7 @@ static void button_gpio_interrupt_handler(void *data, uint8_t pin)
         vg_increase = TRUE;
 }
 
-static void timeout_cb( uint32_t cb_params )
+static void timeout_cb( TIMER_PARAM_TYPE cb_params )
 {
     pressed_duration += BUTTON_PERIODIC_TIME;
     if (pressed_duration >= BUTTON_LONG_TIMEOUT)
@@ -320,11 +427,11 @@ void volume_gain_button_init( void )
 {
     /* Configure GPIO PIN# as input, pull up and interrupt on rising edge and output value as high
      *  (pin should be configured before registering interrupt handler ) */
-    wiced_hal_gpio_configure_pin( AG_BUTTON_VOLUME_GAIN, WICED_GPIO_BUTTON_SETTINGS( GPIO_EN_INT_BOTH_EDGE ), GPIO_PIN_OUTPUT_LOW );
-    wiced_hal_gpio_register_pin_for_interrupt( AG_BUTTON_VOLUME_GAIN, button_gpio_interrupt_handler, NULL );
+    wiced_hal_gpio_configure_pin( app_ag_button_gpio, WICED_GPIO_BUTTON_SETTINGS( GPIO_EN_INT_BOTH_EDGE ), GPIO_PIN_OUTPUT_LOW );
+    wiced_hal_gpio_register_pin_for_interrupt( app_ag_button_gpio, button_gpio_interrupt_handler, &app_ag_button_gpio );
     vg_button = HFP_VGM_VGS_DEFAULT;
     vg_increase = TRUE;
-    wiced_init_timer(&button_timer, timeout_cb, (uint32_t)NULL, WICED_MILLI_SECONDS_PERIODIC_TIMER);
+    wiced_init_timer(&button_timer, timeout_cb, (TIMER_PARAM_TYPE)NULL, WICED_MILLI_SECONDS_PERIODIC_TIMER);
 }
 
 /*
@@ -372,6 +479,50 @@ void hci_control_write_eir( void )
     return;
 }
 
+#if BTSTACK_VER >= 0x03000001
+/*
+ * HF event callback. Format the data to be sent over the UART
+ */
+void hfp_ag_event_callback(uint16_t evt, uint16_t handle,  hfp_ag_event_t *p_data)
+{
+    uint8_t tx_buf[300];
+    uint8_t *p = tx_buf;
+    int i;
+
+    WICED_BT_TRACE("[%u]hfp_ag_hci_send_ag_event: Sending Event: %u  to UART\n", handle, evt);
+
+    *p++ = (uint8_t)(handle);
+    *p++ = (uint8_t)(handle >> 8);
+
+    switch (evt)
+    {
+        case HCI_CONTROL_AG_EVENT_OPEN: /* HS connection opened or connection attempt failed  */
+            for (i = 0; i < BD_ADDR_LEN; i++)
+                *p++ = p_data->open.bd_addr[BD_ADDR_LEN - 1 - i];
+            *p++ = p_data->open.status;
+            break;
+
+        case HCI_CONTROL_AG_EVENT_CONNECTED: /* HS Service Level Connection is UP */
+            *p++ = (uint8_t)(p_data->conn.peer_features);
+            *p++ = (uint8_t)(p_data->conn.peer_features >> 8);
+            break;
+        case HCI_CONTROL_AG_EVENT_AT_CMD:
+            memcpy(p, p_data->at_cmd.cmd_ptr, p_data->at_cmd.cmd_len);
+            p += p_data->at_cmd.cmd_len;
+            break;
+        case HCI_CONTROL_AG_EVENT_AUDIO_OPEN:
+            *p++ = (uint8_t)(p_data->audio_open.wbs_supported);
+            *p++ = (uint8_t)(p_data->audio_open.wbs_used);
+            app_ag_use_wbs = (uint8_t)(p_data->audio_open.wbs_used);
+            break;
+        default: /* Rest have no parameters */
+            break;
+    }
+
+    wiced_transport_send_data( evt, tx_buf, ( int ) ( p - tx_buf ) );
+}
+#endif
+
 void hci_control_ag_init( void )
 {
     hfp_ag_session_cb_t *p_scb = &hci_control_cb.ag_scb[0];
@@ -390,7 +541,11 @@ void hci_control_ag_init( void )
             p_scb->hf_profile_uuid = UUID_SERVCLASS_HEADSET;
     }
 
+#if BTSTACK_VER >= 0x03000001
+    hfp_ag_startup( &hci_control_cb.ag_scb[0], HCI_CONTROL_AG_NUM_SCB, BT_AUDIO_HFP_SUPPORTED_FEATURES, hfp_ag_event_callback);
+#else
     hfp_ag_startup( &hci_control_cb.ag_scb[0], HCI_CONTROL_AG_NUM_SCB, BT_AUDIO_HFP_SUPPORTED_FEATURES );
+#endif
 }
 
 /*
@@ -398,8 +553,13 @@ void hci_control_ag_init( void )
  */
 void hci_control_hci_trace_cback( wiced_bt_hci_trace_type_t type, uint16_t length, uint8_t* p_data )
 {
+#if BTSTACK_VER >= 0x03000001
+    //send the trace
+    wiced_transport_send_hci_trace( type, p_data, length  );
+#else
     //send the trace
     wiced_transport_send_hci_trace( NULL, type, length, p_data  );
+#endif
 }
 
 /*
@@ -434,17 +594,48 @@ wiced_result_t hci_control_management_callback( wiced_bt_management_evt_t event,
             wiced_bt_dev_register_hci_trace( hci_control_hci_trace_cback );
 
             /* Perform the rfcomm init before hf start up */
-            wiced_bt_rfcomm_init( 200, 5 );
+            if( (wiced_bt_rfcomm_result_t)wiced_bt_rfcomm_init( 200, 5 ) != WICED_BT_RFCOMM_SUCCESS )
+            {
+                result = WICED_BT_ERROR;
+                WICED_BT_TRACE("Error Initializing RFCOMM failed\n");
+                break;
+            }
 
             hci_control_ag_init( );
 
+#if BTSTACK_VER >= 0x03000001
+            p_key_info_pool = wiced_bt_create_pool( "key_info", KEY_INFO_POOL_BUFFER_SIZE, KEY_INFO_POOL_BUFFER_COUNT, NULL );
+#else
             p_key_info_pool = wiced_bt_create_pool( KEY_INFO_POOL_BUFFER_SIZE, KEY_INFO_POOL_BUFFER_COUNT );
+#endif
             WICED_BT_TRACE( "wiced_bt_create_pool %x\n", p_key_info_pool );
 
             volume_gain_button_init(); //Use WICED_GPIO_BUTTON to send "+VGM(S)" to HS
 
             hci_control_send_device_started_evt( );
 
+            wiced_bt_sco_setup_voice_path(&audiogateway_sco_path);
+#if defined(CYW55572A1)
+            wiced_am_init();
+            //Open external codec first to prevent DSP download delay later
+            stream_id = wiced_am_stream_open(HFP);
+            if (stream_id == WICED_AUDIO_MANAGER_STREAM_ID_INVALID)
+            {
+                WICED_BT_TRACE("wiced_am_stream_open failed\n");
+            }
+            else
+            {
+                if (wiced_am_stream_close(stream_id) != WICED_SUCCESS)
+                {
+                    WICED_BT_TRACE("Err: wiced_am_stream_close\n");
+                }
+                else
+                {
+                    WICED_BT_TRACE("Init external codec done\n");
+                }
+                stream_id = WICED_AUDIO_MANAGER_STREAM_ID_INVALID;
+            }
+#endif
             break;
 
         case BTM_DISABLED_EVT:
@@ -560,7 +751,61 @@ wiced_result_t hci_control_management_callback( wiced_bt_management_evt_t event,
             break;
 
         case BTM_SCO_CONNECTED_EVT:
+            hfp_ag_sco_management_callback( event, p_event_data );
+#if defined(CYW55572A1)
+            /* setup audio path */
+            if (stream_id == WICED_AUDIO_MANAGER_STREAM_ID_INVALID)
+            {
+                stream_id = wiced_am_stream_open(HFP);
+                WICED_BT_TRACE("wiced_am_stream_open completed stream_id: %d\n", stream_id);
+            }
+
+            /* Set sample rate. */
+            /* app_ag_use_wbs will be updated after executing hfp_ag_sco_management_callback */
+            if (app_ag_use_wbs == WICED_TRUE)
+            {
+                audio_config.sr = AM_PLAYBACK_SR_16K;
+            }
+            else
+            {
+                audio_config.sr = AM_PLAYBACK_SR_8K;
+            }
+
+            audio_config.volume = AM_VOL_LEVEL_HIGH - 2;
+            audio_config.mic_gain = AM_VOL_LEVEL_HIGH - 2;
+
+            if( WICED_SUCCESS != wiced_am_stream_set_param(stream_id, AM_AUDIO_CONFIG, &audio_config))
+                WICED_BT_TRACE("wiced_am_set_param failed\n");
+
+            if( WICED_SUCCESS != wiced_am_stream_start(stream_id))
+                WICED_BT_TRACE("wiced_am_stream_start failed stream_id : %d \n", stream_id);
+
+            /* Set speaker volume and MIC gain to make the volume consistency between call
+             * sessions. */
+            if (WICED_SUCCESS != wiced_am_stream_set_param(stream_id, AM_SPEAKER_VOL_LEVEL, (void *) &audio_config.volume))
+                WICED_BT_TRACE("wiced_am_set_param failed\n");
+
+            if (WICED_SUCCESS != wiced_am_stream_set_param(stream_id, AM_MIC_GAIN_LEVEL, (void *) &audio_config.mic_gain))
+                WICED_BT_TRACE("wiced_am_set_param failed\n");
+#endif
+            break;
+
         case BTM_SCO_DISCONNECTED_EVT:
+#if defined(CYW55572A1)
+            if (stream_id != WICED_AUDIO_MANAGER_STREAM_ID_INVALID)
+            {
+                if( WICED_SUCCESS != wiced_am_stream_stop(stream_id))
+                    WICED_BT_TRACE("wiced_am_stream_stop failed stream_id : %d \n", stream_id);
+
+                if( WICED_SUCCESS != wiced_am_stream_close(stream_id))
+                    WICED_BT_TRACE("wiced_am_stream_close failed stream_id : %d \n", stream_id);
+
+                stream_id = WICED_AUDIO_MANAGER_STREAM_ID_INVALID;
+            }
+#endif
+            hfp_ag_sco_management_callback( event, p_event_data );
+            break;
+
         case BTM_SCO_CONNECTION_REQUEST_EVT:
         case BTM_SCO_CONNECTION_CHANGE_EVT:
             hfp_ag_sco_management_callback( event, p_event_data );
@@ -595,7 +840,9 @@ static uint32_t hci_control_proc_rx_cmd( uint8_t *p_data, uint32_t length )
     if( length < 4 )
     {
         WICED_BT_TRACE("invalid params\n");
+#ifndef BTSTACK_VER
         wiced_transport_free_buffer( p_rx_buf );
+#endif
         return HCI_CONTROL_STATUS_INVALID_ARGS;
     }
 
@@ -624,8 +871,10 @@ static uint32_t hci_control_proc_rx_cmd( uint8_t *p_data, uint32_t length )
         break;
     }
 
+#ifndef BTSTACK_VER
     //Freeing the buffer in which data is received
     wiced_transport_free_buffer( p_rx_buf );
+#endif
     return status;
 }
 
@@ -746,6 +995,7 @@ void hci_control_handle_trace_enable( uint8_t *p_data )
     {
         wiced_bt_dev_register_hci_trace( NULL);
     }
+
     wiced_set_debug_uart( route_debug );
 }
 
@@ -806,6 +1056,7 @@ void hci_control_inquiry_result_cback( wiced_bt_dev_inquiry_scan_result_t *p_inq
     if ( p_inquiry_result == NULL )
     {
         code = HCI_CONTROL_EVENT_INQUIRY_COMPLETE;
+        WICED_BT_TRACE( "inquiry complete \n");
     }
     else
     {
@@ -900,8 +1151,21 @@ void hci_control_send_device_started_evt( void )
 {
     wiced_transport_send_data( HCI_CONTROL_EVENT_DEVICE_STARTED, NULL, 0 );
 
-    WICED_BT_TRACE( "maxLinks:%d maxChannels:%d maxpsm:%d rfcom max links%d, rfcom max ports:%d\n", hci_ag_cfg_settings.l2cap_application.max_links,
-                    hci_ag_cfg_settings.l2cap_application.max_channels, hci_ag_cfg_settings.l2cap_application.max_psm, hci_ag_cfg_settings.rfcomm_cfg.max_links,hci_ag_cfg_settings.rfcomm_cfg.max_ports );
+#if BTSTACK_VER >= 0x03000001
+    WICED_BT_TRACE( "maxChannels:%d maxpsm:%d rfcom max links%d, rfcom max ports:%d\n",
+            hci_ag_cfg_settings.p_l2cap_app_cfg->max_app_l2cap_channels,
+            hci_ag_cfg_settings.p_l2cap_app_cfg->max_app_l2cap_psms,
+            hci_ag_cfg_settings.p_br_cfg->rfcomm_cfg.max_links,
+            hci_ag_cfg_settings.p_br_cfg->rfcomm_cfg.max_ports );
+#else
+    WICED_BT_TRACE( "maxLinks:%d maxChannels:%d maxpsm:%d rfcom max links%d, rfcom max ports:%d\n",
+            hci_ag_cfg_settings.l2cap_application.max_links,
+            hci_ag_cfg_settings.l2cap_application.max_channels,
+            hci_ag_cfg_settings.l2cap_application.max_psm,
+            hci_ag_cfg_settings.rfcomm_cfg.max_links,
+            hci_ag_cfg_settings.rfcomm_cfg.max_ports );
+#endif
+
 }
 
 /*
@@ -1033,6 +1297,26 @@ int hci_control_write_nvram( int nvram_id, int data_len, void *p_data, BOOLEAN f
     hci_control_nvram_chunk_t *p1;
     wiced_result_t            result;
 
+#if BTSTACK_VER >= 0x03000001
+    wiced_bt_device_link_keys_t data;
+    wiced_bt_device_link_keys_t_20721 * p_data_from_host;
+    wiced_bt_device_link_keys_t_20721 device_link_key_data;
+
+    if (from_host)
+    {
+        p_data_from_host = (wiced_bt_device_link_keys_t_20721 *)p_data;
+        memset(&data, 0, sizeof(wiced_bt_device_link_keys_t));
+        memcpy(&data.bd_addr, &p_data_from_host->bd_addr, sizeof(wiced_bt_device_address_t));
+        data.key_data.br_edr_key_type = p_data_from_host->key_data.br_edr_key_type;
+        memcpy(&data.key_data.br_edr_key, &p_data_from_host->key_data.br_edr_key, sizeof(wiced_bt_link_key_t));
+        data.key_data.le_keys_available_mask = p_data_from_host->key_data.le_keys_available_mask;
+        data.key_data.ble_addr_type = p_data_from_host->key_data.ble_addr_type;
+        memcpy(&data.key_data.le_keys, &p_data_from_host->key_data.le_keys, sizeof(wiced_bt_ble_keys_t));
+        data_len = sizeof(wiced_bt_device_link_keys_t);
+        p_data = &data;
+}
+#endif
+
     /* first check if this ID is being reused and release the memory chunk */
     hci_control_delete_nvram( nvram_id ,WICED_FALSE);
 
@@ -1055,15 +1339,13 @@ int hci_control_write_nvram( int nvram_id, int data_len, void *p_data, BOOLEAN f
 
     p_nvram_first = p1;
 
-    {
-        wiced_bt_device_link_keys_t * p_keys = ( wiced_bt_device_link_keys_t *) p_data;
+    wiced_bt_device_link_keys_t * p_keys = ( wiced_bt_device_link_keys_t *) p_data;
 #ifdef CYW20706A2
-        result = wiced_bt_dev_add_device_to_address_resolution_db( p_keys ,
-                p_keys->key_data.ble_addr_type );
+    result = wiced_bt_dev_add_device_to_address_resolution_db( p_keys ,
+            p_keys->key_data.ble_addr_type );
 #else
-        result = wiced_bt_dev_add_device_to_address_resolution_db( p_keys );
+    result = wiced_bt_dev_add_device_to_address_resolution_db( p_keys );
 #endif
-    }
 
     WICED_BT_TRACE("Updated Addr Resolution DB:%d\n", result );
 
@@ -1072,8 +1354,21 @@ int hci_control_write_nvram( int nvram_id, int data_len, void *p_data, BOOLEAN f
     {
         *p++ = nvram_id & 0xff;
         *p++ = (nvram_id >> 8) & 0xff;
-        memcpy(p, p_data, data_len);
+#if BTSTACK_VER >= 0x03000001
+        memset(&device_link_key_data, 0, sizeof(wiced_bt_device_link_keys_t_20721));
+        memcpy(&device_link_key_data.bd_addr, &p_keys->bd_addr, sizeof(wiced_bt_device_address_t));
 
+        device_link_key_data.key_data.br_edr_key_type = p_keys->key_data.br_edr_key_type;
+        memcpy(&device_link_key_data.key_data.br_edr_key, &p_keys->key_data.br_edr_key, sizeof(wiced_bt_link_key_t));
+        device_link_key_data.key_data.le_keys_available_mask = p_keys->key_data.le_keys_available_mask;
+        device_link_key_data.key_data.ble_addr_type = p_keys->key_data.ble_addr_type;
+        memcpy(&device_link_key_data.key_data.le_keys, &p_keys->key_data.le_keys, sizeof(wiced_bt_ble_keys_t));
+        memcpy(p, &device_link_key_data, sizeof(wiced_bt_device_link_keys_t_20721));
+        data_len = sizeof(wiced_bt_device_link_keys_t_20721);
+
+#else
+        memcpy(p, p_data, data_len);
+#endif
         wiced_transport_send_data( HCI_CONTROL_EVENT_NVRAM_DATA, tx_buf, ( int )( data_len + 2 ) );
     }
     return (data_len);
@@ -1195,11 +1490,17 @@ int hci_control_alloc_nvram_id( )
     return ( nvram_id );
 }
 
-void hci_control_tx_complete( wiced_transport_buffer_pool_t* p_pool )
+#if BTSTACK_VER >= 0x03000001
+static void hci_control_tx_complete(void)
+{
+    return;
+}
+#else
+static void hci_control_tx_complete( wiced_transport_buffer_pool_t* p_pool )
 {
     WICED_BT_TRACE ( "hci_control_tx_complete :%x \n", p_pool );
 }
-
+#endif
 
 /* Handle misc command group */
 void hci_control_misc_handle_command( uint16_t cmd_opcode, uint8_t* p_data, uint32_t data_len )

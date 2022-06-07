@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2021, Cypress Semiconductor Corporation (an Infineon company) or
+ * Copyright 2016-2022, Cypress Semiconductor Corporation (an Infineon company) or
  * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
  *
  * This software, including source code, documentation and related
@@ -104,7 +104,9 @@ extern void     hci_control_delete_nvram( int nvram_id , wiced_bool_t from_host)
 extern int      hci_control_alloc_nvram_id( );
 
 extern const wiced_bt_cfg_settings_t hci_ag_cfg_settings;
+#ifndef BTSTACK_VER
 extern const wiced_bt_cfg_buf_pool_t hci_ag_cfg_buf_pools[];
+#endif
 extern const wiced_bt_audio_config_buffer_t hci_ag_audio_buf_config;
 
 #endif /* HCI_AUDIO_GATEWAY_H */

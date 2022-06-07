@@ -1,5 +1,5 @@
 #
-# Copyright 2016-2021, Cypress Semiconductor Corporation (an Infineon company) or
+# Copyright 2016-2022, Cypress Semiconductor Corporation (an Infineon company) or
 # an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
 #
 # This software, including source code, documentation and related
@@ -42,14 +42,14 @@ CONFIG=Debug
 VERBOSE=
 
 # default target
-TARGET=CYW920721B2EVK-02
+TARGET=CYW920721M2EVK-02
 
 SUPPORTED_TARGETS = \
-  CYW920721B2EVK-02 \
   CYW920719B2Q40EVB-01 \
   CYW920706WCDEVAL \
   CYW920721M2EVK-01 \
   CYW920721M2EVK-02 \
+  CYW955572BTEVK-01 \
   CYW920721M2EVB-03
 
 #
@@ -105,6 +105,20 @@ ifeq ($(AUDIO_SHIELD_20721M2EVB_03_INCLUDED),1)
 DISABLE_COMPONENTS += bsp_design_modus
 COMPONENTS += bsp_design_modus_shield
 endif
+
+ifeq ($(TARGET),CYW955572BTEVK-01)
+# Application Configuration
+CY_APP_DEFINES += -DAPP_CFG_ENABLE_BR_AUDIO=1
+CY_APP_DEFINES += -DWICED_BT_HFP_HF_WBS_INCLUDED=TRUE
+CY_APP_DEFINES += -DCS47L35_CODEC_ENABLE
+COMPONENTS += cyw9bt_audio2
+COMPONENTS += codec_cs47l35_lib
+COMPONENTS += audiomanager
+
+## Apply new Audio Profiles
+DISABLE_COMPONENTS += hfp_audio_gateway
+COMPONENTS += hfp_audio_gateway_btstack
+endif # TARGET
 
 ################################################################################
 # Paths
