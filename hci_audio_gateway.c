@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2022, Cypress Semiconductor Corporation (an Infineon company) or
+ * Copyright 2016-2023, Cypress Semiconductor Corporation (an Infineon company) or
  * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
  *
  * This software, including source code, documentation and related
@@ -55,7 +55,7 @@
  * MCU implementation on Windows platform.
  *
  * Features demonstrated
- *  - WICED BT Handsfree (Audio Gateway) APIs
+ *  - AIROC Bluetooth Handsfree (Audio Gateway) APIs
  *  - Handling of the UART WICED protocol
  *  - Setting of the Local Bluetooth Device address from the host MCU
  *
@@ -300,7 +300,7 @@ APPLICATION_START( )
     wiced_hal_puart_configuration( 3000000, PARITY_NONE, STOP_BIT_2 );
 #endif
     wiced_set_debug_uart( WICED_ROUTE_DEBUG_TO_PUART );
-#if ( defined(CYW20706A2) || defined(CYW20735B0) || defined(CYW20719B0) || defined(CYW43012C0) )
+#if ( defined(CYW20706A2) || defined(CYW43012C0) )
     wiced_hal_puart_select_uart_pads( WICED_PUART_RXD, WICED_PUART_TXD, 0, 0);
 #endif
 

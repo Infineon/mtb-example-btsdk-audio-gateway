@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2022, Cypress Semiconductor Corporation (an Infineon company) or
+ * Copyright 2016-2023, Cypress Semiconductor Corporation (an Infineon company) or
  * an affiliate of Cypress Semiconductor Corporation.  All rights reserved.
  *
  * This software, including source code, documentation and related
@@ -48,10 +48,10 @@
  * wiced_bt core stack configuration
  ****************************************************************************/
 #if BTSTACK_VER >= 0x03000001
-/* BLE SCAN Setting */
+/* LE SCAN Setting */
 const wiced_bt_cfg_ble_scan_settings_t wiced_bt_cfg_scan_settings =
 {
-    .scan_mode = BTM_BLE_SCAN_MODE_ACTIVE, /**< BLE scan mode ( BTM_BLE_SCAN_MODE_PASSIVE, BTM_BLE_SCAN_MODE_ACTIVE, or BTM_BLE_SCAN_MODE_NONE ) */
+    .scan_mode = BTM_BLE_SCAN_MODE_ACTIVE, /**< LE scan mode ( BTM_BLE_SCAN_MODE_PASSIVE, BTM_BLE_SCAN_MODE_ACTIVE, or BTM_BLE_SCAN_MODE_NONE ) */
 
     /* Advertisement scan configuration */
     .high_duty_scan_interval = 96, /**< High duty scan interval */
@@ -78,7 +78,7 @@ const wiced_bt_cfg_ble_scan_settings_t wiced_bt_cfg_scan_settings =
     .conn_supervision_timeout = WICED_BT_CFG_DEFAULT_CONN_SUPERVISION_TIMEOUT, /**< Connection link supervision timeout */
 };
 
-/* BLE ADV Setting */
+/* LE ADV Setting */
 const wiced_bt_cfg_ble_advert_settings_t wiced_bt_cfg_adv_settings =
 {
     .channel_map = BTM_BLE_ADVERT_CHNL_37 | /**< Advertising channel map ( mask of BTM_BLE_ADVERT_CHNL_37, BTM_BLE_ADVERT_CHNL_38, BTM_BLE_ADVERT_CHNL_39 ) */
@@ -156,7 +156,7 @@ const wiced_bt_cfg_isoc_t wiced_bt_cfg_isoc =
     .max_buffers_per_cis = 0,
 };
 
-/* BLE Setting */
+/* LE Setting */
 const wiced_bt_cfg_ble_t wiced_bt_cfg_ble =
 {
     .ble_max_simultaneous_links = 1,
@@ -166,7 +166,7 @@ const wiced_bt_cfg_ble_t wiced_bt_cfg_ble =
     .host_addr_resolution_db_size = 5, /**< LE Address Resolution DB settings - effective only for pre 4.2 controller*/
     .p_ble_scan_cfg = &wiced_bt_cfg_scan_settings,
     .p_ble_advert_cfg = &wiced_bt_cfg_adv_settings,
-    .default_ble_power_level = 0,  /**< Default BLE Power */
+    .default_ble_power_level = 0,  /**< Default LE Power */
 };
 
 /* GATT Setting */
@@ -209,9 +209,9 @@ const wiced_bt_cfg_settings_t hci_ag_cfg_settings =
         .page_scan_window                = WICED_BT_CFG_DEFAULT_PAGE_SCAN_WINDOW                       /**< Page scan window (0 to use default) */
     },
 
-    .ble_scan_cfg =                                                 /* BLE scan settings  */
+    .ble_scan_cfg =                                                 /* LE scan settings  */
     {
-        .scan_mode                       = BTM_BLE_SCAN_MODE_ACTIVE,                                   /**< BLE scan mode (BTM_BLE_SCAN_MODE_PASSIVE, BTM_BLE_SCAN_MODE_ACTIVE, or BTM_BLE_SCAN_MODE_NONE) */
+        .scan_mode                       = BTM_BLE_SCAN_MODE_ACTIVE,                                   /**< LE scan mode (BTM_BLE_SCAN_MODE_PASSIVE, BTM_BLE_SCAN_MODE_ACTIVE, or BTM_BLE_SCAN_MODE_NONE) */
 
         /* Advertisement scan configuration */
         .high_duty_scan_interval         = 96,                                                         /**< High duty scan interval */
@@ -238,7 +238,7 @@ const wiced_bt_cfg_settings_t hci_ag_cfg_settings =
         .conn_supervision_timeout        = WICED_BT_CFG_DEFAULT_CONN_SUPERVISION_TIMEOUT,              /**< Connection link supervision timeout */
     },
 
-    .ble_advert_cfg =                                               /* BLE advertisement settings */
+    .ble_advert_cfg =                                               /* LE advertisement settings */
     {
         .channel_map                     = BTM_BLE_ADVERT_CHNL_37 |                                    /**< Advertising channel map (mask of BTM_BLE_ADVERT_CHNL_37, BTM_BLE_ADVERT_CHNL_38, BTM_BLE_ADVERT_CHNL_39) */
                                            BTM_BLE_ADVERT_CHNL_38 |
@@ -329,7 +329,7 @@ const wiced_bt_cfg_settings_t hci_ag_cfg_settings =
 
     /* Interval of  random address refreshing */
     .rpa_refresh_timeout                = WICED_BT_CFG_DEFAULT_RANDOM_ADDRESS_NEVER_CHANGE,            /**< Interval of  random address refreshing - secs */
-    /* BLE Filter Accept List size */
+    /* LE Filter Accept List size */
     .ble_filter_accept_list_size                = 0,                                                           /**< Maximum number of Filter Accept List devices allowed. Cannot be more than 128 */
 #endif
 
